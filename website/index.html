@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TLE Globe</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0a1a; display: flex; justify-content: center; align-items: center; height: 100vh; }
+    svg { cursor: grab; }
+    svg:active { cursor: grabbing; }
+    .graticule { fill: none; stroke: #1a2a4a; stroke-width: 0.5; }
+    .land { fill: #1a3a2a; stroke: #2a5a3a; stroke-width: 0.5; }
+    .sphere { fill: #0d1b2a; }
+    .border { fill: none; stroke: #0a2a1a; stroke-width: 0.3; }
+  </style>
+</head>
+<body>
+  <svg id="globe"></svg>
+
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3"></script>
+  <script src="globe.js"></script>
+</body>
+</html>
