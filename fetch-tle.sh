@@ -14,11 +14,13 @@ ST_PASS="${PASS}"
 OUT="${OUT:-data/visual.txt}"
 COOKIES="/tmp/st-cookies.txt"
 LOGIN_URL="https://www.space-track.org/ajaxauth/login"
-TLE_URL="https://www.space-track.org/basicspacedata/query/class/gp/OBJECT_TYPE/PAYLOAD/PERIOD/0--128/orderby/NORAD_CAT_ID/limit/100/format/tle"
+LEO_URL="https://www.space-track.org/basicspacedata/query/class/gp/OBJECT_TYPE/PAYLOAD/PERIOD/87--120/orderby/MEAN_MOTION%20desc/limit/100/format/3le"
+EXTRA_URL="https://www.space-track.org/basicspacedata/query/class/gp/NORAD_CAT_ID/25544,43700/format/3le"
 
 curl -s -c "$COOKIES" -b "$COOKIES" "$LOGIN_URL" \
   -d "identity=${ST_USER}&password=${ST_PASS}" > /dev/null
 
-curl -s -c "$COOKIES" -b "$COOKIES" "$TLE_URL" -o "$OUT"
+curl -s -c "$COOKIES" -b "$COOKIES" "$LEO_URL" > "$OUT"
+curl -s -c "$COOKIES" -b "$COOKIES" "$EXTRA_URL" >> "$OUT"
 
 rm -f "$COOKIES"

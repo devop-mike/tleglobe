@@ -36,6 +36,7 @@ const landGroup = svg.append('g');
 const borderGroup = svg.append('g');
 const trailLayer = svg.append('g');
 const satLayer = svg.append('g');
+const labelLayer = svg.append('g').attr('display', 'none');
 
 fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
   .then(r => r.json())
@@ -68,25 +69,145 @@ function elevatedXY(lon, lat, altKm) {
   return [cx + (sx - cx) * factor, cy + (sy - cy) * factor];
 }
 
-function renderTrails() {
-  if (trailCoords.length) updateTrails();
+// Tooltip
+const tooltip = d3.select('#tooltip');
+function showTooltip(event, name) {
+  tooltip.style('display', 'block').text(name);
+  moveTooltip(event);
+}
+function moveTooltip(event) {
+  tooltip.style('left', (event.clientX + 14) + 'px').style('top', (event.clientY - 10) + 'px');
+}
+function hideTooltip() { tooltip.style('display', 'none'); }
+
+// Satellite state
+let hoveredSat = null;
+let selectedSats = new Set();
+let showSelectedOnly = false;
+let labelsVisible = false;
+let timeRotationEnabled = false;
+let timeRotationInterval = null;
+
+function refreshSatStyles() {
+  satLayer.selectAll('circle.sat')
+    .attr('r', d => selectedSats.has(d.name) ? 3.5 : 2)
+    .attr('fill', d => selectedSats.has(d.name) ? '#fff' : '#00ff88')
+    .attr('fill-opacity', d => (selectedSats.has(d.name) || d.name === hoveredSat) ? 1 : 0.85);
+}
+
+function setListHover(name) {
+  d3.select('#sat-list').selectAll('.sat-item')
+    .classed('hovered', d => d.name === name);
+}
+
+function updateShowSelectedRow() {
+  const hasSelection = selectedSats.size > 0;
+  document.getElementById('show-selected-row').classList.toggle('visible', hasSelection);
+  if (!hasSelection) {
+    showSelectedOnly = false;
+    document.getElementById('show-selected').checked = false;
+  }
 }
 
 function renderSatellites() {
-  const visible = currentSats.filter(s => isVisible(s.lon, s.lat));
+  let visible = currentSats.filter(s => isVisible(s.lon, s.lat));
+  if (showSelectedOnly && selectedSats.size > 0) {
+    visible = visible.filter(s => selectedSats.has(s.name));
+  }
+
   satLayer.selectAll('circle.sat')
     .data(visible, d => d.name)
-    .join('circle')
-    .attr('class', 'sat')
-    .attr('r', 2)
+    .join(
+      enter => enter.append('circle')
+        .attr('class', 'sat')
+        .style('cursor', 'pointer')
+        .on('mouseover', (event, d) => {
+          hoveredSat = d.name;
+          showTooltip(event, d.name);
+          refreshSatStyles();
+          setListHover(d.name);
+        })
+        .on('mousemove', moveTooltip)
+        .on('mouseout', () => {
+          hoveredSat = null;
+          hideTooltip();
+          refreshSatStyles();
+          setListHover(null);
+        })
+        .on('click', (event, d) => {
+          event.stopPropagation();
+          if (selectedSats.has(d.name)) selectedSats.delete(d.name);
+          else selectedSats.add(d.name);
+          refreshSatStyles();
+          renderSatList();
+          updateShowSelectedRow();
+        }),
+      update => update,
+      exit => exit.remove(),
+    )
+    .attr('r', d => selectedSats.has(d.name) ? 3.5 : 2)
+    .attr('fill', d => selectedSats.has(d.name) ? '#fff' : '#00ff88')
+    .attr('fill-opacity', d => (selectedSats.has(d.name) || d.name === hoveredSat) ? 1 : 0.85)
     .attr('cx', d => elevatedXY(d.lon, d.lat, d.alt)[0])
     .attr('cy', d => elevatedXY(d.lon, d.lat, d.alt)[1]);
+}
+
+function renderSatList() {
+  const sorted = tleData.slice().sort((a, b) => a.name.localeCompare(b.name));
+  d3.select('#sat-list').selectAll('.sat-item')
+    .data(sorted, d => d.name)
+    .join(
+      enter => enter.append('div')
+        .attr('class', 'sat-item')
+        .text(d => d.name)
+        .on('mouseover', (event, d) => {
+          hoveredSat = d.name;
+          refreshSatStyles();
+          setListHover(d.name);
+        })
+        .on('mouseout', () => {
+          hoveredSat = null;
+          refreshSatStyles();
+          setListHover(null);
+        })
+        .on('click', (event, d) => {
+          if (selectedSats.has(d.name)) selectedSats.delete(d.name);
+          else selectedSats.add(d.name);
+          refreshSatStyles();
+          renderSatList();
+          updateShowSelectedRow();
+        }),
+      update => update,
+      exit => exit.remove(),
+    )
+    .classed('selected', d => selectedSats.has(d.name))
+    .classed('hovered', d => d.name === hoveredSat);
+}
+
+function renderLabels() {
+  if (!labelsVisible) return;
+  const visible = currentSats.filter(s => isVisible(s.lon, s.lat));
+  if (showSelectedOnly && selectedSats.size > 0) {
+    visible.splice(0, visible.length, ...visible.filter(s => selectedSats.has(s.name)));
+  }
+  labelLayer.selectAll('text.sat-label')
+    .data(visible, d => d.name)
+    .join('text')
+    .attr('class', 'sat-label')
+    .text(d => d.name)
+    .attr('x', d => elevatedXY(d.lon, d.lat, d.alt)[0] + 4)
+    .attr('y', d => elevatedXY(d.lon, d.lat, d.alt)[1] - 4);
+}
+
+function renderTrails() {
+  if (trailCoords.length) updateTrails();
 }
 
 function render() {
   svg.selectAll('path').attr('d', path);
   renderTrails();
   renderSatellites();
+  renderLabels();
 }
 
 // Drag to rotate
@@ -119,7 +240,7 @@ svg.on('wheel', (event) => {
   render();
 });
 
-// Satellites
+// TLE data
 let tleData = [];
 let currentSats = [];
 let trailCoords = [];
@@ -133,11 +254,10 @@ function parseTLEs(text) {
   while (i < lines.length) {
     const l0 = lines[i], l1 = lines[i + 1], l2 = lines[i + 2];
     if (l0 && l1 && l2 && !l0.startsWith('1 ') && !l0.startsWith('2 ') && l1.startsWith('1 ') && l2.startsWith('2 ')) {
-      // 3-line format: name, line1, line2
-      try { sats.push({ name: l0, satrec: satellite.twoline2satrec(l1, l2) }); } catch (_) {}
+      const name = l0.startsWith('0 ') ? l0.slice(2) : l0;
+      try { sats.push({ name, satrec: satellite.twoline2satrec(l1, l2) }); } catch (_) {}
       i += 3;
     } else if (l0 && l1 && l0.startsWith('1 ') && l1.startsWith('2 ')) {
-      // 2-line format: line1, line2 (use catalog number as name)
       try { sats.push({ name: l0.substring(2, 7).trim(), satrec: satellite.twoline2satrec(l0, l1) }); } catch (_) {}
       i += 2;
     } else {
@@ -175,16 +295,23 @@ function buildTrailPath(coords) {
 }
 
 function updateTrails() {
+  let data = trailCoords;
+  if (showSelectedOnly && selectedSats.size > 0) {
+    data = data.filter(t => selectedSats.has(t.name));
+  }
   trailLayer.selectAll('path.trail')
-    .data(trailCoords.map(buildTrailPath))
+    .data(data, t => t.name)
     .join('path')
     .attr('class', 'trail')
-    .attr('d', d => d);
+    .attr('d', t => buildTrailPath(t.coords));
 }
 
 function recomputeTrails() {
   const now = new Date();
-  trailCoords = tleData.map(({ satrec }) => computeTrailCoords(satrec, now, trailMinutes)).filter(Boolean);
+  trailCoords = tleData.map(({ name, satrec }) => {
+    const coords = computeTrailCoords(satrec, now, trailMinutes);
+    return coords ? { name, coords } : null;
+  }).filter(Boolean);
   updateTrails();
 }
 
@@ -213,6 +340,37 @@ function updateSatellites() {
   if (trailsVisible) recomputeTrails();
 }
 
+// Controls
+document.getElementById('labels-toggle').addEventListener('change', (e) => {
+  labelsVisible = e.target.checked;
+  labelLayer.attr('display', labelsVisible ? null : 'none');
+  if (labelsVisible) renderLabels();
+  else labelLayer.selectAll('text').remove();
+});
+
+document.getElementById('time-rotation').addEventListener('change', (e) => {
+  timeRotationEnabled = e.target.checked;
+  if (timeRotationEnabled) {
+    const tick = () => {
+      const now = new Date();
+      const utcHours = now.getUTCHours() + now.getUTCMinutes() / 60 + now.getUTCSeconds() / 3600;
+      const [, lat] = projection.rotate();
+      projection.rotate([(utcHours - 12) * 15, lat]);
+      render();
+    };
+    tick();
+    timeRotationInterval = setInterval(tick, 1000);
+  } else {
+    clearInterval(timeRotationInterval);
+  }
+});
+
+document.getElementById('center-btn').addEventListener('click', () => {
+  projection.scale(radius).translate([width / 2, height / 2]);
+  svg.select('circle.sphere').attr('r', radius).attr('cx', width / 2).attr('cy', height / 2);
+  render();
+});
+
 document.getElementById('trails-toggle').addEventListener('change', (e) => {
   trailsVisible = e.target.checked;
   trailLayer.attr('display', trailsVisible ? null : 'none');
@@ -226,10 +384,17 @@ document.getElementById('trail-length').addEventListener('input', (e) => {
   recomputeTrails();
 });
 
+document.getElementById('show-selected').addEventListener('change', (e) => {
+  showSelectedOnly = e.target.checked;
+  renderSatellites();
+  updateTrails();
+});
+
 fetch('data/visual.txt')
   .then(r => r.text())
   .then(text => {
     tleData = parseTLEs(text);
+    renderSatList();
     updateSatellites();
     setInterval(updateSatellites, 5000);
   })
