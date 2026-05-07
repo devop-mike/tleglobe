@@ -280,7 +280,7 @@ function parseTLEs(text) {
 
 function computeTrailCoords(satrec, fromDate, durationMin) {
   const coords = [];
-  for (let t = 0; t <= durationMin; t += 1) {
+  for (let t = 0; t <= durationMin; t += 1 / 4) {
     const date = new Date(fromDate.getTime() + t * 60000);
     try {
       const { position } = satellite.propagate(satrec, date);
@@ -348,6 +348,7 @@ function propagate(date) {
 function updateSatellites() {
   currentSats = propagate(new Date());
   renderSatellites();
+  renderLabels();
   if (trailsVisible) recomputeTrails();
 }
 
@@ -398,6 +399,7 @@ document.getElementById('trail-length').addEventListener('input', (e) => {
 document.getElementById('show-selected').addEventListener('change', (e) => {
   showSelectedOnly = e.target.checked;
   renderSatellites();
+  renderLabels();
   updateTrails();
 });
 
