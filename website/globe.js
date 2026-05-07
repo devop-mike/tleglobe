@@ -289,7 +289,7 @@ svg.on('wheel', (event) => {
 let tleData = [];
 let currentSats = [];
 let trailCoords = [];
-let trailMinutes = 5;
+let trailMinutes = 15;
 let trailsVisible = true;
 
 function parseTLEs(text) {
@@ -335,9 +335,12 @@ function computeTrailCoords(satrec, fromDate, durationMin) {
 function buildTrailPath(coords) {
   let d = '';
   let prevLon = null;
+  const [cx, cy] = projection.translate();
+  const r = projection.scale();
   for (const [lon, lat, alt] of coords) {
     if (!isVisible(lon, lat)) { prevLon = null; continue; }
     const [x, y] = elevatedXY(lon, lat, alt);
+    if ((x - cx) ** 2 + (y - cy) ** 2 > r * r) { prevLon = null; continue; }
     const jump = prevLon !== null && Math.abs(lon - prevLon) > 180;
     d += (prevLon === null || jump) ? `M${x.toFixed(1)},${y.toFixed(1)}` : `L${x.toFixed(1)},${y.toFixed(1)}`;
     prevLon = lon;
