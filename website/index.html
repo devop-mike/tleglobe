@@ -14,7 +14,7 @@
     .sphere { fill: #0d1b2a; }
     .border { fill: none; stroke: #0a2a1a; stroke-width: 0.3; }
     .sat { fill: #00ff88; fill-opacity: 0.85; }
-    .trail { fill: none; stroke: #00ff88; stroke-width: 0.5; stroke-opacity: 0.25; }
+    .trail { fill: none; stroke-width: 0.5; stroke-opacity: 0.25; }
     .sat-label { fill: #00ff88; font-family: monospace; font-size: 9px; pointer-events: none; opacity: 0.8; }
 
     #sidebar {
@@ -80,9 +80,29 @@
     #show-selected-row input { accent-color: #00ff88; cursor: pointer; }
     #show-selected-row label { cursor: pointer; font-size: 0.7rem; }
 
+    #category-filters {
+      padding: 0.4rem 1rem;
+      border-bottom: 1px solid #1a2a4a;
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      flex-shrink: 0;
+    }
+    .cat-row {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      cursor: pointer;
+      font-size: 0.75rem;
+    }
+    .cat-row input { cursor: pointer; }
+    .cat-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .cat-count { color: #3a5a4a; }
+
     #sat-list { overflow-y: auto; flex: 1; }
     .sat-item {
-      padding: 0.2rem 1rem;
+      padding: 0.2rem 0.75rem;
+      border-left: 3px solid transparent;
       cursor: pointer;
       white-space: nowrap;
       overflow: hidden;
@@ -119,6 +139,7 @@
       <label><input type="checkbox" id="time-rotation"> Track time</label>
       <button id="center-btn">Center</button>
     </div>
+    <div id="category-filters"></div>
     <div id="sat-list-header">
       <span>Satellites</span>
       <div id="show-selected-row">

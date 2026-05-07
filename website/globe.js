@@ -8,6 +8,36 @@ const cy0 = height / 2;
 const sensitivity = 75;
 const EARTH_RADIUS_KM = 6371;
 
+// Category definitions
+const HAM_NORADS = new Set([
+  7530, 22825, 24278, 25544, 27607, 39444,
+  40903, 40906, 40907, 40908, 40910, 40911, 40931, 40967,
+  42759, 42761, 43017, 43137, 43678, 43770, 43803,
+  44909, 45119, 46494, 46785,
+]);
+const WEATHER_NORADS = new Set([25338, 28654, 33591, 37849, 38771, 40069, 43013, 43689, 44387]);
+const CATEGORY_COLORS = {
+  ham: '#ffd700',
+  weather: '#00bfff',
+  starlink: '#aaaaaa',
+  cosmos: '#ff6b6b',
+  flock: '#ff9944',
+  other: '#00ff88',
+};
+const CATEGORY_LABELS = {
+  ham: 'Ham radio', weather: 'Weather', starlink: 'Starlink',
+  cosmos: 'COSMOS', flock: 'FLOCK', other: 'Other',
+};
+
+function getCategory(name, noradId) {
+  if (HAM_NORADS.has(noradId)) return 'ham';
+  if (WEATHER_NORADS.has(noradId)) return 'weather';
+  if (name.startsWith('STARLINK')) return 'starlink';
+  if (name.startsWith('COSMOS')) return 'cosmos';
+  if (name.startsWith('FLOCK')) return 'flock';
+  return 'other';
+}
+
 const projection = d3.geoOrthographic()
   .scale(radius)
   .center([0, 0])
@@ -93,11 +123,12 @@ let showSelectedOnly = false;
 let labelsVisible = false;
 let timeRotationEnabled = false;
 let timeRotationInterval = null;
+let hiddenCategories = new Set();
 
 function refreshSatStyles() {
   satLayer.selectAll('circle.sat')
     .attr('r', d => selectedSats.has(d.name) ? 3.5 : 2)
-    .attr('fill', d => selectedSats.has(d.name) ? '#fff' : '#00ff88')
+    .attr('fill', d => selectedSats.has(d.name) ? '#fff' : CATEGORY_COLORS[d.category])
     .attr('fill-opacity', d => (selectedSats.has(d.name) || d.name === hoveredSat) ? 1 : 0.85);
 }
 
@@ -116,7 +147,7 @@ function updateShowSelectedRow() {
 }
 
 function renderSatellites() {
-  let visible = currentSats.filter(s => isVisible(s.lon, s.lat));
+  let visible = currentSats.filter(s => isVisible(s.lon, s.lat) && !hiddenCategories.has(s.category));
   if (showSelectedOnly && selectedSats.size > 0) {
     visible = visible.filter(s => selectedSats.has(s.name));
   }
@@ -152,14 +183,16 @@ function renderSatellites() {
       exit => exit.remove(),
     )
     .attr('r', d => selectedSats.has(d.name) ? 3.5 : 2)
-    .attr('fill', d => selectedSats.has(d.name) ? '#fff' : '#00ff88')
+    .attr('fill', d => selectedSats.has(d.name) ? '#fff' : CATEGORY_COLORS[d.category])
     .attr('fill-opacity', d => (selectedSats.has(d.name) || d.name === hoveredSat) ? 1 : 0.85)
     .attr('cx', d => elevatedXY(d.lon, d.lat, d.alt)[0])
     .attr('cy', d => elevatedXY(d.lon, d.lat, d.alt)[1]);
 }
 
 function renderSatList() {
-  const sorted = tleData.slice().sort((a, b) => a.name.localeCompare(b.name));
+  const sorted = tleData
+    .filter(s => !hiddenCategories.has(s.category))
+    .sort((a, b) => a.name.localeCompare(b.name));
   d3.select('#sat-list').selectAll('.sat-item')
     .data(sorted, d => d.name)
     .join(
@@ -187,14 +220,15 @@ function renderSatList() {
       exit => exit.remove(),
     )
     .classed('selected', d => selectedSats.has(d.name))
-    .classed('hovered', d => d.name === hoveredSat);
+    .classed('hovered', d => d.name === hoveredSat)
+    .style('border-left-color', d => CATEGORY_COLORS[d.category]);
 }
 
 function renderLabels() {
   if (!labelsVisible) return;
-  const visible = currentSats.filter(s => isVisible(s.lon, s.lat));
+  let visible = currentSats.filter(s => isVisible(s.lon, s.lat) && !hiddenCategories.has(s.category));
   if (showSelectedOnly && selectedSats.size > 0) {
-    visible.splice(0, visible.length, ...visible.filter(s => selectedSats.has(s.name)));
+    visible = visible.filter(s => selectedSats.has(s.name));
   }
   labelLayer.selectAll('text.sat-label')
     .data(visible, d => d.name)
@@ -266,16 +300,22 @@ function parseTLEs(text) {
     const l0 = lines[i], l1 = lines[i + 1], l2 = lines[i + 2];
     if (l0 && l1 && l2 && !l0.startsWith('1 ') && !l0.startsWith('2 ') && l1.startsWith('1 ') && l2.startsWith('2 ')) {
       const name = l0.startsWith('0 ') ? l0.slice(2) : l0;
-      try { sats.push({ name, satrec: satellite.twoline2satrec(l1, l2) }); } catch (_) {}
+      const noradId = parseInt(l1.substring(2, 7).trim());
+      try { sats.push({ name, noradId, category: getCategory(name, noradId), satrec: satellite.twoline2satrec(l1, l2) }); } catch (_) {}
       i += 3;
     } else if (l0 && l1 && l0.startsWith('1 ') && l1.startsWith('2 ')) {
-      try { sats.push({ name: l0.substring(2, 7).trim(), satrec: satellite.twoline2satrec(l0, l1) }); } catch (_) {}
+      const noradId = parseInt(l0.substring(2, 7).trim());
+      const name = String(noradId);
+      try { sats.push({ name, noradId, category: getCategory(name, noradId), satrec: satellite.twoline2satrec(l0, l1) }); } catch (_) {}
       i += 2;
     } else {
       i++;
     }
   }
-  return sats;
+  // Deduplicate by NORAD ID — last occurrence wins (EXTRA_URL appended last)
+  const seen = new Map();
+  for (const s of sats) seen.set(s.noradId, s);
+  return Array.from(seen.values());
 }
 
 function computeTrailCoords(satrec, fromDate, durationMin) {
@@ -306,7 +346,7 @@ function buildTrailPath(coords) {
 }
 
 function updateTrails() {
-  let data = trailCoords;
+  let data = trailCoords.filter(t => !hiddenCategories.has(t.category));
   if (showSelectedOnly && selectedSats.size > 0) {
     data = data.filter(t => selectedSats.has(t.name));
   }
@@ -314,14 +354,15 @@ function updateTrails() {
     .data(data, t => t.name)
     .join('path')
     .attr('class', 'trail')
+    .attr('stroke', t => CATEGORY_COLORS[t.category])
     .attr('d', t => buildTrailPath(t.coords));
 }
 
 function recomputeTrails() {
   const now = new Date();
-  trailCoords = tleData.map(({ name, satrec }) => {
+  trailCoords = tleData.map(({ name, category, satrec }) => {
     const coords = computeTrailCoords(satrec, now, trailMinutes);
-    return coords ? { name, coords } : null;
+    return coords ? { name, category, coords } : null;
   }).filter(Boolean);
   updateTrails();
 }
@@ -329,13 +370,15 @@ function recomputeTrails() {
 function propagate(date) {
   const gmst = satellite.gstime(date);
   const result = [];
-  for (const { name, satrec } of tleData) {
+  for (const { name, noradId, category, satrec } of tleData) {
     try {
       const { position } = satellite.propagate(satrec, date);
       if (!position || typeof position === 'boolean') continue;
       const geo = satellite.eciToGeodetic(position, gmst);
       result.push({
         name,
+        noradId,
+        category,
         lon: satellite.degreesLong(geo.longitude),
         lat: satellite.degreesLat(geo.latitude),
         alt: geo.height,
@@ -350,6 +393,28 @@ function updateSatellites() {
   renderSatellites();
   renderLabels();
   if (trailsVisible) recomputeTrails();
+}
+
+function buildCategoryFilters() {
+  const counts = {};
+  for (const { category } of tleData) counts[category] = (counts[category] || 0) + 1;
+  const container = document.getElementById('category-filters');
+  container.innerHTML = '';
+  for (const cat of ['ham', 'weather', 'starlink', 'cosmos', 'flock', 'other']) {
+    if (!counts[cat]) continue;
+    const label = document.createElement('label');
+    label.className = 'cat-row';
+    label.innerHTML = `<input type="checkbox" checked><span class="cat-dot" style="background:${CATEGORY_COLORS[cat]}"></span>${CATEGORY_LABELS[cat]} <span class="cat-count">(${counts[cat]})</span>`;
+    label.querySelector('input').addEventListener('change', e => {
+      if (e.target.checked) hiddenCategories.delete(cat);
+      else hiddenCategories.add(cat);
+      renderSatellites();
+      renderLabels();
+      updateTrails();
+      renderSatList();
+    });
+    container.appendChild(label);
+  }
 }
 
 // Controls
@@ -407,6 +472,7 @@ fetch('data/visual.txt')
   .then(r => r.text())
   .then(text => {
     tleData = parseTLEs(text);
+    buildCategoryFilters();
     renderSatList();
     updateSatellites();
     setInterval(updateSatellites, 5000);
