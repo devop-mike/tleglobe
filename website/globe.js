@@ -1,10 +1,11 @@
-const width = Math.min(window.innerWidth, window.innerHeight) * 0.9;
-const height = width;
+const width = window.innerWidth;
+const height = window.innerHeight;
+const radius = Math.min(width, height) / 2 - 10;
 const sensitivity = 75;
 const EARTH_RADIUS_KM = 6371;
 
 const projection = d3.geoOrthographic()
-  .scale(width / 2 - 10)
+  .scale(radius)
   .center([0, 0])
   .rotate([0, -30])
   .translate([width / 2, height / 2]);
@@ -19,7 +20,7 @@ svg.append('circle')
   .attr('class', 'sphere')
   .attr('cx', width / 2)
   .attr('cy', height / 2)
-  .attr('r', projection.scale());
+  .attr('r', radius);
 
 svg.append('path')
   .datum({ type: 'Sphere' })
@@ -33,7 +34,7 @@ svg.append('path')
 
 const landGroup = svg.append('g');
 const borderGroup = svg.append('g');
-const trailLayer = svg.append('g').attr('display', 'none');
+const trailLayer = svg.append('g');
 const satLayer = svg.append('g');
 
 fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
@@ -62,13 +63,13 @@ function isVisible(lon, lat) {
 
 function elevatedXY(lon, lat, altKm) {
   const [sx, sy] = projection([lon, lat]);
-  const cx = width / 2, cy = height / 2;
+  const [cx, cy] = projection.translate();
   const factor = (EARTH_RADIUS_KM + altKm) / EARTH_RADIUS_KM;
   return [cx + (sx - cx) * factor, cy + (sy - cy) * factor];
 }
 
 function renderTrails() {
-  trailLayer.selectAll('path.trail').attr('d', path);
+  if (trailCoords.length) updateTrails();
 }
 
 function renderSatellites() {
@@ -102,19 +103,28 @@ const drag = d3.drag()
 
 svg.call(drag);
 
-// Scroll to zoom
+// Scroll to zoom towards cursor
 svg.on('wheel', (event) => {
   event.preventDefault();
+  const [mx, my] = d3.pointer(event);
   const scale = projection.scale();
-  const newScale = Math.max(50, Math.min(width, scale - event.deltaY * 0.5));
-  projection.scale(newScale);
-  svg.select('circle.sphere').attr('r', newScale);
+  const newScale = Math.max(50, Math.min(Math.min(width, height) * 4, scale - event.deltaY * 0.5));
+  const [tx, ty] = projection.translate();
+  const factor = newScale / scale;
+  projection
+    .scale(newScale)
+    .translate([mx + (tx - mx) * factor, my + (ty - my) * factor]);
+  const [ntx, nty] = projection.translate();
+  svg.select('circle.sphere').attr('r', newScale).attr('cx', ntx).attr('cy', nty);
   render();
 });
 
 // Satellites
 let tleData = [];
 let currentSats = [];
+let trailCoords = [];
+let trailMinutes = 5;
+let trailsVisible = true;
 
 function parseTLEs(text) {
   const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
@@ -137,31 +147,45 @@ function parseTLEs(text) {
   return sats;
 }
 
-function computeTrail(satrec) {
-  const now = new Date();
-  const periodMin = (2 * Math.PI) / satrec.no;
-  if (!isFinite(periodMin) || periodMin < 1 || periodMin > 1440) return null;
+function computeTrailCoords(satrec, fromDate, durationMin) {
   const coords = [];
-  let segment = [];
-
-  for (let t = 0; t <= periodMin; t += 1) {
-    const date = new Date(now.getTime() + t * 60000);
+  for (let t = 0; t <= durationMin; t += 1) {
+    const date = new Date(fromDate.getTime() + t * 60000);
     try {
       const { position } = satellite.propagate(satrec, date);
       if (!position || typeof position === 'boolean') continue;
       const geo = satellite.eciToGeodetic(position, satellite.gstime(date));
-      const lon = satellite.degreesLong(geo.longitude);
-      const lat = satellite.degreesLat(geo.latitude);
-      if (segment.length && Math.abs(lon - segment[segment.length - 1][0]) > 180) {
-        coords.push(segment);
-        segment = [];
-      }
-      segment.push([lon, lat]);
+      coords.push([satellite.degreesLong(geo.longitude), satellite.degreesLat(geo.latitude), geo.height]);
     } catch (_) {}
   }
-  if (segment.length) coords.push(segment);
+  return coords.length ? coords : null;
+}
 
-  return { type: 'Feature', geometry: { type: 'MultiLineString', coordinates: coords } };
+function buildTrailPath(coords) {
+  let d = '';
+  let prevLon = null;
+  for (const [lon, lat, alt] of coords) {
+    if (!isVisible(lon, lat)) { prevLon = null; continue; }
+    const [x, y] = elevatedXY(lon, lat, alt);
+    const jump = prevLon !== null && Math.abs(lon - prevLon) > 180;
+    d += (prevLon === null || jump) ? `M${x.toFixed(1)},${y.toFixed(1)}` : `L${x.toFixed(1)},${y.toFixed(1)}`;
+    prevLon = lon;
+  }
+  return d;
+}
+
+function updateTrails() {
+  trailLayer.selectAll('path.trail')
+    .data(trailCoords.map(buildTrailPath))
+    .join('path')
+    .attr('class', 'trail')
+    .attr('d', d => d);
+}
+
+function recomputeTrails() {
+  const now = new Date();
+  trailCoords = tleData.map(({ satrec }) => computeTrailCoords(satrec, now, trailMinutes)).filter(Boolean);
+  updateTrails();
 }
 
 function propagate(date) {
@@ -186,24 +210,26 @@ function propagate(date) {
 function updateSatellites() {
   currentSats = propagate(new Date());
   renderSatellites();
+  if (trailsVisible) recomputeTrails();
 }
 
 document.getElementById('trails-toggle').addEventListener('change', (e) => {
-  trailLayer.attr('display', e.target.checked ? null : 'none');
+  trailsVisible = e.target.checked;
+  trailLayer.attr('display', trailsVisible ? null : 'none');
+  document.getElementById('trail-length-row').classList.toggle('visible', trailsVisible);
+  if (trailsVisible) recomputeTrails();
+});
+
+document.getElementById('trail-length').addEventListener('input', (e) => {
+  trailMinutes = +e.target.value;
+  document.getElementById('trail-length-value').textContent = `${trailMinutes} min`;
+  recomputeTrails();
 });
 
 fetch('data/visual.txt')
   .then(r => r.text())
   .then(text => {
     tleData = parseTLEs(text);
-
-    const trails = tleData.map(({ satrec }) => computeTrail(satrec)).filter(Boolean);
-    trailLayer.selectAll('path.trail')
-      .data(trails)
-      .join('path')
-      .attr('class', 'trail')
-      .attr('d', path);
-
     updateSatellites();
     setInterval(updateSatellites, 5000);
   })
