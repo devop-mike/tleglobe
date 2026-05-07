@@ -9,6 +9,7 @@ const projection = d3.geoOrthographic()
   .translate([width / 2, height / 2]);
 
 const path = d3.geoPath().projection(projection);
+const satPath = d3.geoPath().projection(projection).pointRadius(2);
 
 const svg = d3.select('#globe')
   .attr('width', width)
@@ -32,6 +33,7 @@ svg.append('path')
 
 const landGroup = svg.append('g');
 const borderGroup = svg.append('g');
+const satLayer = svg.append('g');
 
 fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
   .then(r => r.json())
@@ -48,6 +50,11 @@ fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
       .attr('d', path);
   });
 
+function render() {
+  svg.selectAll('path:not(.sat)').attr('d', path);
+  satLayer.selectAll('path.sat').attr('d', satPath);
+}
+
 // Drag to rotate
 const drag = d3.drag()
   .on('drag', (event) => {
@@ -57,7 +64,7 @@ const drag = d3.drag()
       rotate[0] + event.dx * k,
       rotate[1] - event.dy * k,
     ]);
-    svg.selectAll('path').attr('d', path);
+    render();
   });
 
 svg.call(drag);
@@ -69,5 +76,62 @@ svg.on('wheel', (event) => {
   const newScale = Math.max(50, Math.min(width, scale - event.deltaY * 0.5));
   projection.scale(newScale);
   svg.select('circle.sphere').attr('r', newScale);
-  svg.selectAll('path').attr('d', path);
+  satPath.pointRadius(Math.max(1, newScale / (width / 2) * 2));
+  render();
 });
+
+// Satellites
+let satData = [];
+
+function parseTLEs(text) {
+  const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
+  const sats = [];
+  for (let i = 0; i + 2 < lines.length; i += 3) {
+    try {
+      sats.push({
+        name: lines[i],
+        satrec: satellite.twoline2satrec(lines[i + 1], lines[i + 2]),
+      });
+    } catch (_) {}
+  }
+  return sats;
+}
+
+function getSatFeatures(date) {
+  const gmst = satellite.gstime(date);
+  const features = [];
+  for (const { name, satrec } of satData) {
+    try {
+      const { position } = satellite.propagate(satrec, date);
+      if (!position || typeof position === 'boolean') continue;
+      const geo = satellite.eciToGeodetic(position, gmst);
+      features.push({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [satellite.degreesLong(geo.longitude), satellite.degreesLat(geo.latitude)],
+        },
+        properties: { name },
+      });
+    } catch (_) {}
+  }
+  return features;
+}
+
+function updateSatellites() {
+  const features = getSatFeatures(new Date());
+  satLayer.selectAll('path.sat')
+    .data(features)
+    .join('path')
+    .attr('class', 'sat')
+    .attr('d', satPath);
+}
+
+fetch('data/visual.txt')
+  .then(r => r.text())
+  .then(text => {
+    satData = parseTLEs(text);
+    updateSatellites();
+    setInterval(updateSatellites, 5000);
+  })
+  .catch(err => console.error('Failed to load TLE data:', err));
