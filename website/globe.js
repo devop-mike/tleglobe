@@ -1,6 +1,10 @@
 const width = window.innerWidth;
 const height = window.innerHeight;
-const radius = Math.min(width, height) / 2 - 10;
+const sidebarWidth = 200;
+const globeWidth = width - sidebarWidth;
+const radius = Math.min(globeWidth, height) / 2 - 10;
+const cx0 = sidebarWidth + globeWidth / 2;
+const cy0 = height / 2;
 const sensitivity = 75;
 const EARTH_RADIUS_KM = 6371;
 
@@ -8,7 +12,7 @@ const projection = d3.geoOrthographic()
   .scale(radius)
   .center([0, 0])
   .rotate([0, -30])
-  .translate([width / 2, height / 2]);
+  .translate([cx0, cy0]);
 
 const path = d3.geoPath().projection(projection);
 
@@ -16,10 +20,14 @@ const svg = d3.select('#globe')
   .attr('width', width)
   .attr('height', height);
 
+svg.append('defs').append('clipPath').attr('id', 'sphere-clip')
+  .append('circle').attr('id', 'sphere-clip-circle')
+  .attr('cx', cx0).attr('cy', cy0).attr('r', radius);
+
 svg.append('circle')
   .attr('class', 'sphere')
-  .attr('cx', width / 2)
-  .attr('cy', height / 2)
+  .attr('cx', cx0)
+  .attr('cy', cy0)
   .attr('r', radius);
 
 svg.append('path')
@@ -34,9 +42,9 @@ svg.append('path')
 
 const landGroup = svg.append('g');
 const borderGroup = svg.append('g');
-const trailLayer = svg.append('g');
-const satLayer = svg.append('g');
-const labelLayer = svg.append('g').attr('display', 'none');
+const trailLayer = svg.append('g').attr('clip-path', 'url(#sphere-clip)');
+const satLayer = svg.append('g').attr('clip-path', 'url(#sphere-clip)');
+const labelLayer = svg.append('g').attr('display', 'none').attr('clip-path', 'url(#sphere-clip)');
 
 fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
   .then(r => r.json())
@@ -65,7 +73,9 @@ function isVisible(lon, lat) {
 function elevatedXY(lon, lat, altKm) {
   const [sx, sy] = projection([lon, lat]);
   const [cx, cy] = projection.translate();
-  const factor = (EARTH_RADIUS_KM + altKm) / EARTH_RADIUS_KM;
+  // Log-scale altitude so GEO appears just outside LEO rather than 6x away
+  const visualAlt = altKm <= 2000 ? altKm : 2000 + Math.log10(altKm / 2000) * 1000;
+  const factor = (EARTH_RADIUS_KM + visualAlt) / EARTH_RADIUS_KM;
   return [cx + (sx - cx) * factor, cy + (sy - cy) * factor];
 }
 
@@ -224,6 +234,13 @@ const drag = d3.drag()
 
 svg.call(drag);
 
+function syncSphereCircles() {
+  const [tx, ty] = projection.translate();
+  const s = projection.scale();
+  svg.select('circle.sphere').attr('r', s).attr('cx', tx).attr('cy', ty);
+  svg.select('#sphere-clip-circle').attr('r', s).attr('cx', tx).attr('cy', ty);
+}
+
 // Scroll to zoom towards cursor
 svg.on('wheel', (event) => {
   event.preventDefault();
@@ -235,8 +252,7 @@ svg.on('wheel', (event) => {
   projection
     .scale(newScale)
     .translate([mx + (tx - mx) * factor, my + (ty - my) * factor]);
-  const [ntx, nty] = projection.translate();
-  svg.select('circle.sphere').attr('r', newScale).attr('cx', ntx).attr('cy', nty);
+  syncSphereCircles();
   render();
 });
 
@@ -366,8 +382,8 @@ document.getElementById('time-rotation').addEventListener('change', (e) => {
 });
 
 document.getElementById('center-btn').addEventListener('click', () => {
-  projection.scale(radius).translate([width / 2, height / 2]);
-  svg.select('circle.sphere').attr('r', radius).attr('cx', width / 2).attr('cy', height / 2);
+  projection.scale(radius).translate([cx0, cy0]);
+  svg.select('circle.sphere').attr('r', radius).attr('cx', cx0).attr('cy', cy0);
   render();
 });
 
