@@ -20,10 +20,6 @@ const svg = d3.select('#globe')
   .attr('width', width)
   .attr('height', height);
 
-svg.append('defs').append('clipPath').attr('id', 'sphere-clip')
-  .append('circle').attr('id', 'sphere-clip-circle')
-  .attr('cx', cx0).attr('cy', cy0).attr('r', radius);
-
 svg.append('circle')
   .attr('class', 'sphere')
   .attr('cx', cx0)
@@ -42,9 +38,9 @@ svg.append('path')
 
 const landGroup = svg.append('g');
 const borderGroup = svg.append('g');
-const trailLayer = svg.append('g').attr('clip-path', 'url(#sphere-clip)');
-const satLayer = svg.append('g').attr('clip-path', 'url(#sphere-clip)');
-const labelLayer = svg.append('g').attr('display', 'none').attr('clip-path', 'url(#sphere-clip)');
+const trailLayer = svg.append('g');
+const satLayer = svg.append('g');
+const labelLayer = svg.append('g').attr('display', 'none');
 
 fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
   .then(r => r.json())
@@ -238,7 +234,6 @@ function syncSphereCircles() {
   const [tx, ty] = projection.translate();
   const s = projection.scale();
   svg.select('circle.sphere').attr('r', s).attr('cx', tx).attr('cy', ty);
-  svg.select('#sphere-clip-circle').attr('r', s).attr('cx', tx).attr('cy', ty);
 }
 
 // Scroll to zoom towards cursor
