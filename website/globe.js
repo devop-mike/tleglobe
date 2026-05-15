@@ -1,28 +1,26 @@
+const isMobile = window.innerWidth < 768;
 const width = window.innerWidth;
 const height = window.innerHeight;
-const sidebarWidth = 200;
+const sidebarWidth = isMobile ? 0 : 200;
 const globeWidth = width - sidebarWidth;
 const radius = Math.min(globeWidth, height) / 2 - 10;
 const cx0 = sidebarWidth + globeWidth / 2;
 const cy0 = height / 2;
 const sensitivity = 75;
 const EARTH_RADIUS_KM = 6371;
+const DOT_R = isMobile ? 3.5 : 2;
+const DOT_R_SEL = isMobile ? 5 : 3.5;
 
-// Category definitions
 const HAM_NORADS = new Set([
   7530, 22825, 24278, 25544, 27607, 39444,
-  40903, 40906, 40907, 40908, 40910, 40911, 40931, 40967,
+  40910, 40931, 40967,
   42759, 42761, 43017, 43137, 43678, 43770, 43803,
   44909, 45119, 46494, 46785,
 ]);
 const WEATHER_NORADS = new Set([25338, 28654, 33591, 37849, 38771, 40069, 43013, 43689, 44387]);
 const CATEGORY_COLORS = {
-  ham: '#ffd700',
-  weather: '#00bfff',
-  starlink: '#aaaaaa',
-  cosmos: '#ff6b6b',
-  flock: '#ff9944',
-  other: '#00ff88',
+  ham: '#ffd700', weather: '#00bfff', starlink: '#aaaaaa',
+  cosmos: '#ff6b6b', flock: '#ff9944', other: '#00ff88',
 };
 const CATEGORY_LABELS = {
   ham: 'Ham radio', weather: 'Weather', starlink: 'Starlink',
@@ -50,21 +48,9 @@ const svg = d3.select('#globe')
   .attr('width', width)
   .attr('height', height);
 
-svg.append('circle')
-  .attr('class', 'sphere')
-  .attr('cx', cx0)
-  .attr('cy', cy0)
-  .attr('r', radius);
-
-svg.append('path')
-  .datum({ type: 'Sphere' })
-  .attr('class', 'sphere')
-  .attr('d', path);
-
-svg.append('path')
-  .datum(d3.geoGraticule()())
-  .attr('class', 'graticule')
-  .attr('d', path);
+svg.append('circle').attr('class', 'sphere').attr('cx', cx0).attr('cy', cy0).attr('r', radius);
+svg.append('path').datum({ type: 'Sphere' }).attr('class', 'sphere').attr('d', path);
+svg.append('path').datum(d3.geoGraticule()()).attr('class', 'graticule').attr('d', path);
 
 const landGroup = svg.append('g');
 const borderGroup = svg.append('g');
@@ -77,14 +63,10 @@ fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
   .then(world => {
     landGroup.selectAll('path')
       .data(topojson.feature(world, world.objects.countries).features)
-      .join('path')
-      .attr('class', 'land')
-      .attr('d', path);
-
+      .join('path').attr('class', 'land').attr('d', path);
     borderGroup.append('path')
       .datum(topojson.mesh(world, world.objects.countries, (a, b) => a !== b))
-      .attr('class', 'border')
-      .attr('d', path);
+      .attr('class', 'border').attr('d', path);
   });
 
 function isVisible(lon, lat) {
@@ -99,13 +81,12 @@ function isVisible(lon, lat) {
 function elevatedXY(lon, lat, altKm) {
   const [sx, sy] = projection([lon, lat]);
   const [cx, cy] = projection.translate();
-  // Log-scale altitude so GEO appears just outside LEO rather than 6x away
   const visualAlt = altKm <= 2000 ? altKm : 2000 + Math.log10(altKm / 2000) * 1000;
   const factor = (EARTH_RADIUS_KM + visualAlt) / EARTH_RADIUS_KM;
   return [cx + (sx - cx) * factor, cy + (sy - cy) * factor];
 }
 
-// Tooltip
+// Tooltip (desktop)
 const tooltip = d3.select('#tooltip');
 function showTooltip(event, name) {
   tooltip.style('display', 'block').text(name);
@@ -115,6 +96,16 @@ function moveTooltip(event) {
   tooltip.style('left', (event.clientX + 14) + 'px').style('top', (event.clientY - 10) + 'px');
 }
 function hideTooltip() { tooltip.style('display', 'none'); }
+
+// Name badge (mobile)
+const nameBadge = document.getElementById('name-badge');
+let badgeTimer = null;
+function showBadge(name) {
+  clearTimeout(badgeTimer);
+  nameBadge.textContent = name;
+  nameBadge.classList.add('visible');
+  badgeTimer = setTimeout(() => nameBadge.classList.remove('visible'), 2500);
+}
 
 // Satellite state
 let hoveredSat = null;
@@ -127,20 +118,19 @@ let hiddenCategories = new Set();
 
 function refreshSatStyles() {
   satLayer.selectAll('circle.sat')
-    .attr('r', d => selectedSats.has(d.name) ? 3.5 : 2)
+    .attr('r', d => selectedSats.has(d.name) ? DOT_R_SEL : DOT_R)
     .attr('fill', d => selectedSats.has(d.name) ? '#fff' : CATEGORY_COLORS[d.category])
     .attr('fill-opacity', d => (selectedSats.has(d.name) || d.name === hoveredSat) ? 1 : 0.85);
 }
 
 function setListHover(name) {
-  d3.select('#sat-list').selectAll('.sat-item')
-    .classed('hovered', d => d.name === name);
+  d3.select('#sat-list').selectAll('.sat-item').classed('hovered', d => d.name === name);
 }
 
 function updateShowSelectedRow() {
-  const hasSelection = selectedSats.size > 0;
-  document.getElementById('show-selected-row').classList.toggle('visible', hasSelection);
-  if (!hasSelection) {
+  const has = selectedSats.size > 0;
+  document.getElementById('show-selected-row').classList.toggle('visible', has);
+  if (!has) {
     showSelectedOnly = false;
     document.getElementById('show-selected').checked = false;
   }
@@ -148,9 +138,7 @@ function updateShowSelectedRow() {
 
 function renderSatellites() {
   let visible = currentSats.filter(s => isVisible(s.lon, s.lat) && !hiddenCategories.has(s.category));
-  if (showSelectedOnly && selectedSats.size > 0) {
-    visible = visible.filter(s => selectedSats.has(s.name));
-  }
+  if (showSelectedOnly && selectedSats.size > 0) visible = visible.filter(s => selectedSats.has(s.name));
 
   satLayer.selectAll('circle.sat')
     .data(visible, d => d.name)
@@ -175,6 +163,7 @@ function renderSatellites() {
           event.stopPropagation();
           if (selectedSats.has(d.name)) selectedSats.delete(d.name);
           else selectedSats.add(d.name);
+          if (isMobile) showBadge(d.name);
           refreshSatStyles();
           renderSatList();
           updateShowSelectedRow();
@@ -182,7 +171,7 @@ function renderSatellites() {
       update => update,
       exit => exit.remove(),
     )
-    .attr('r', d => selectedSats.has(d.name) ? 3.5 : 2)
+    .attr('r', d => selectedSats.has(d.name) ? DOT_R_SEL : DOT_R)
     .attr('fill', d => selectedSats.has(d.name) ? '#fff' : CATEGORY_COLORS[d.category])
     .attr('fill-opacity', d => (selectedSats.has(d.name) || d.name === hoveredSat) ? 1 : 0.85)
     .attr('cx', d => elevatedXY(d.lon, d.lat, d.alt)[0])
@@ -200,21 +189,15 @@ function renderSatList() {
         .attr('class', 'sat-item')
         .text(d => d.name)
         .on('mouseover', (event, d) => {
-          hoveredSat = d.name;
-          refreshSatStyles();
-          setListHover(d.name);
+          hoveredSat = d.name; refreshSatStyles(); setListHover(d.name);
         })
         .on('mouseout', () => {
-          hoveredSat = null;
-          refreshSatStyles();
-          setListHover(null);
+          hoveredSat = null; refreshSatStyles(); setListHover(null);
         })
         .on('click', (event, d) => {
           if (selectedSats.has(d.name)) selectedSats.delete(d.name);
           else selectedSats.add(d.name);
-          refreshSatStyles();
-          renderSatList();
-          updateShowSelectedRow();
+          refreshSatStyles(); renderSatList(); updateShowSelectedRow();
         }),
       update => update,
       exit => exit.remove(),
@@ -227,9 +210,7 @@ function renderSatList() {
 function renderLabels() {
   if (!labelsVisible) return;
   let visible = currentSats.filter(s => isVisible(s.lon, s.lat) && !hiddenCategories.has(s.category));
-  if (showSelectedOnly && selectedSats.size > 0) {
-    visible = visible.filter(s => selectedSats.has(s.name));
-  }
+  if (showSelectedOnly && selectedSats.size > 0) visible = visible.filter(s => selectedSats.has(s.name));
   labelLayer.selectAll('text.sat-label')
     .data(visible, d => d.name)
     .join('text')
@@ -239,30 +220,12 @@ function renderLabels() {
     .attr('y', d => elevatedXY(d.lon, d.lat, d.alt)[1] - 4);
 }
 
-function renderTrails() {
-  if (trailCoords.length) updateTrails();
-}
-
 function render() {
   svg.selectAll('path').attr('d', path);
-  renderTrails();
+  if (trailCoords.length) updateTrails();
   renderSatellites();
   renderLabels();
 }
-
-// Drag to rotate
-const drag = d3.drag()
-  .on('drag', (event) => {
-    const rotate = projection.rotate();
-    const k = sensitivity / projection.scale();
-    projection.rotate([
-      rotate[0] + event.dx * k,
-      rotate[1] - event.dy * k,
-    ]);
-    render();
-  });
-
-svg.call(drag);
 
 function syncSphereCircles() {
   const [tx, ty] = projection.translate();
@@ -270,7 +233,56 @@ function syncSphereCircles() {
   svg.select('circle.sphere').attr('r', s).attr('cx', tx).attr('cy', ty);
 }
 
-// Scroll to zoom towards cursor
+// Unified pointer handler — 1 pointer rotates, 2 pointers pinch-zoom.
+// Replaces d3.drag + separate touch handlers so they can't conflict.
+const activePointers = new Map();
+let lastPinchDist = null;
+
+svg.node().addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  svg.node().setPointerCapture(e.pointerId);
+  activePointers.set(e.pointerId, [e.clientX, e.clientY]);
+});
+
+svg.node().addEventListener('pointermove', (e) => {
+  if (!activePointers.has(e.pointerId)) return;
+  const [px, py] = activePointers.get(e.pointerId);
+  activePointers.set(e.pointerId, [e.clientX, e.clientY]);
+
+  if (activePointers.size === 1) {
+    const k = sensitivity / projection.scale();
+    const [r0, r1] = projection.rotate();
+    projection.rotate([r0 + (e.clientX - px) * k, r1 - (e.clientY - py) * k]);
+    render();
+  } else if (activePointers.size === 2) {
+    const pts = Array.from(activePointers.values());
+    const dist = Math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]);
+    if (lastPinchDist !== null) {
+      const scale = projection.scale();
+      const newScale = Math.max(50, Math.min(Math.min(width, height) * 4, scale * dist / lastPinchDist));
+      const [tx, ty] = projection.translate();
+      const mx = (pts[0][0] + pts[1][0]) / 2;
+      const my = (pts[0][1] + pts[1][1]) / 2;
+      const factor = newScale / scale;
+      projection.scale(newScale).translate([mx + (tx - mx) * factor, my + (ty - my) * factor]);
+      syncSphereCircles();
+      render();
+    }
+    lastPinchDist = dist;
+  }
+});
+
+svg.node().addEventListener('pointerup', (e) => {
+  activePointers.delete(e.pointerId);
+  if (activePointers.size < 2) lastPinchDist = null;
+});
+
+svg.node().addEventListener('pointercancel', (e) => {
+  activePointers.delete(e.pointerId);
+  if (activePointers.size < 2) lastPinchDist = null;
+});
+
+// Scroll zoom (desktop)
 svg.on('wheel', (event) => {
   event.preventDefault();
   const [mx, my] = d3.pointer(event);
@@ -278,9 +290,7 @@ svg.on('wheel', (event) => {
   const newScale = Math.max(50, Math.min(Math.min(width, height) * 4, scale - event.deltaY * 0.5));
   const [tx, ty] = projection.translate();
   const factor = newScale / scale;
-  projection
-    .scale(newScale)
-    .translate([mx + (tx - mx) * factor, my + (ty - my) * factor]);
+  projection.scale(newScale).translate([mx + (tx - mx) * factor, my + (ty - my) * factor]);
   syncSphereCircles();
   render();
 });
@@ -308,11 +318,8 @@ function parseTLEs(text) {
       const name = String(noradId);
       try { sats.push({ name, noradId, category: getCategory(name, noradId), satrec: satellite.twoline2satrec(l0, l1) }); } catch (_) {}
       i += 2;
-    } else {
-      i++;
-    }
+    } else { i++; }
   }
-  // Deduplicate by NORAD ID — last occurrence wins (EXTRA_URL appended last)
   const seen = new Map();
   for (const s of sats) seen.set(s.noradId, s);
   return Array.from(seen.values());
@@ -350,9 +357,7 @@ function buildTrailPath(coords) {
 
 function updateTrails() {
   let data = trailCoords.filter(t => !hiddenCategories.has(t.category));
-  if (showSelectedOnly && selectedSats.size > 0) {
-    data = data.filter(t => selectedSats.has(t.name));
-  }
+  if (showSelectedOnly && selectedSats.size > 0) data = data.filter(t => selectedSats.has(t.name));
   trailLayer.selectAll('path.trail')
     .data(data, t => t.name)
     .join('path')
@@ -378,14 +383,10 @@ function propagate(date) {
       const { position } = satellite.propagate(satrec, date);
       if (!position || typeof position === 'boolean') continue;
       const geo = satellite.eciToGeodetic(position, gmst);
-      result.push({
-        name,
-        noradId,
-        category,
+      result.push({ name, noradId, category,
         lon: satellite.degreesLong(geo.longitude),
         lat: satellite.degreesLat(geo.latitude),
-        alt: geo.height,
-      });
+        alt: geo.height });
     } catch (_) {}
   }
   return result;
@@ -411,10 +412,7 @@ function buildCategoryFilters() {
     label.querySelector('input').addEventListener('change', e => {
       if (e.target.checked) hiddenCategories.delete(cat);
       else hiddenCategories.add(cat);
-      renderSatellites();
-      renderLabels();
-      updateTrails();
-      renderSatList();
+      renderSatellites(); renderLabels(); updateTrails(); renderSatList();
     });
     container.appendChild(label);
   }
@@ -466,9 +464,59 @@ document.getElementById('trail-length').addEventListener('input', (e) => {
 
 document.getElementById('show-selected').addEventListener('change', (e) => {
   showSelectedOnly = e.target.checked;
-  renderSatellites();
-  renderLabels();
-  updateTrails();
+  renderSatellites(); renderLabels(); updateTrails();
+});
+
+// Drawer (mobile)
+const sidebar = document.getElementById('sidebar');
+const mobileControls = document.getElementById('mobile-controls');
+function setDrawer(open) {
+  sidebar.classList.toggle('open', open);
+  if (mobileControls) mobileControls.classList.toggle('drawer-open', open);
+}
+document.getElementById('drawer-btn').addEventListener('click', () => setDrawer(!sidebar.classList.contains('open')));
+document.getElementById('drawer-handle').addEventListener('click', () => setDrawer(false));
+
+// Mobile control buttons
+function holdButton(el, fn) {
+  let iv = null;
+  const start = (e) => { e.preventDefault(); fn(); iv = setInterval(fn, 80); };
+  const stop = () => { clearInterval(iv); iv = null; };
+  el.addEventListener('pointerdown', start);
+  el.addEventListener('pointerup', stop);
+  el.addEventListener('pointercancel', stop);
+  el.addEventListener('pointerleave', stop);
+}
+
+holdButton(document.getElementById('rot-up'),    () => { const [r0,r1]=projection.rotate(); projection.rotate([r0,r1-3]); render(); });
+holdButton(document.getElementById('rot-down'),  () => { const [r0,r1]=projection.rotate(); projection.rotate([r0,r1+3]); render(); });
+holdButton(document.getElementById('rot-left'),  () => { const [r0,r1]=projection.rotate(); projection.rotate([r0-3,r1]); render(); });
+holdButton(document.getElementById('rot-right'), () => { const [r0,r1]=projection.rotate(); projection.rotate([r0+3,r1]); render(); });
+
+holdButton(document.getElementById('pan-up'),    () => { const [tx,ty]=projection.translate(); projection.translate([tx,ty-10]); syncSphereCircles(); render(); });
+holdButton(document.getElementById('pan-down'),  () => { const [tx,ty]=projection.translate(); projection.translate([tx,ty+10]); syncSphereCircles(); render(); });
+holdButton(document.getElementById('pan-left'),  () => { const [tx,ty]=projection.translate(); projection.translate([tx-10,ty]); syncSphereCircles(); render(); });
+holdButton(document.getElementById('pan-right'), () => { const [tx,ty]=projection.translate(); projection.translate([tx+10,ty]); syncSphereCircles(); render(); });
+
+holdButton(document.getElementById('zoom-in-btn'),  () => {
+  const s = projection.scale();
+  const ns = Math.min(Math.min(width,height)*4, s*1.08);
+  const [tx,ty]=projection.translate(); const f=ns/s;
+  projection.scale(ns).translate([cx0+(tx-cx0)*f, cy0+(ty-cy0)*f]);
+  syncSphereCircles(); render();
+});
+holdButton(document.getElementById('zoom-out-btn'), () => {
+  const s = projection.scale();
+  const ns = Math.max(50, s/1.08);
+  const [tx,ty]=projection.translate(); const f=ns/s;
+  projection.scale(ns).translate([cx0+(tx-cx0)*f, cy0+(ty-cy0)*f]);
+  syncSphereCircles(); render();
+});
+
+document.getElementById('center-mobile-btn').addEventListener('click', () => {
+  projection.scale(radius).translate([cx0, cy0]);
+  svg.select('circle.sphere').attr('r', radius).attr('cx', cx0).attr('cy', cy0);
+  render();
 });
 
 fetch('data/visual.txt')
