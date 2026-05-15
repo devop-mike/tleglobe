@@ -2,7 +2,7 @@
 
 A real-time satellite tracking globe. Live at [m0ofc.co.uk/tleglobe](https://m0ofc.co.uk/tleglobe/)
 
-![TLE Globe](tleglobe.png)
+<img src="tleglobe.png" width="500">
 
 ## Features
 
